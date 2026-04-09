@@ -9,6 +9,7 @@ idf_component_register(
         "audio_eq.c"
         "hearing_cal.c"
         "audio_dsp.c"
+        "audio_dither.c"
         "dsp_test.c"
     INCLUDE_DIRS
         "."

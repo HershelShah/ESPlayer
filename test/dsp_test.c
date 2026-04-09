@@ -30,6 +30,7 @@ static inline void *heap_caps_malloc(size_t s, uint32_t c) { return malloc(s); }
 // Include the actual source files directly
 #include "../main/audio_eq.c"
 #include "../main/audio_dsp.c"
+#include "../main/audio_dither.c"
 
 // ===========================================================================
 // Test helpers
@@ -267,6 +268,63 @@ static void test_crossfeed_mixes_channels(void)
     audio_dsp_set_crossfeed(false);
 }
 
+static void test_dither_output_range(void)
+{
+    printf("\n--- test_dither_output_range ---\n");
+    uint32_t state;
+    dither_init(&state);
+
+    // Full-scale signal should not clip excessively
+    int clipped = 0;
+    for (int i = 0; i < 10000; i++) {
+        float x = sinf(2.0f * M_PI * 997.0f * i / SR);
+        int16_t out = dither_f32_to_i16(x * 0.95f, &state);
+        if (out == 32767 || out == -32768) clipped++;
+    }
+    printf("  Clipped: %d / 10000\n", clipped);
+    ASSERT(clipped < 100, "Dithered output should rarely clip at -0.5dBFS");
+    PASS("Dither output range OK");
+}
+
+static void test_dither_adds_noise(void)
+{
+    printf("\n--- test_dither_adds_noise ---\n");
+    uint32_t state;
+    dither_init(&state);
+
+    // Silence input — output should be dither noise, not all zeros
+    int nonzero = 0;
+    for (int i = 0; i < 1000; i++) {
+        int16_t out = dither_f32_to_i16(0.0f, &state);
+        if (out != 0) nonzero++;
+    }
+    printf("  Nonzero samples from silence: %d / 1000\n", nonzero);
+    ASSERT(nonzero > 100, "Dither should produce some noise on silence");
+    PASS("Dither adds noise to silence");
+}
+
+static void test_dither_preserves_signal(void)
+{
+    printf("\n--- test_dither_preserves_signal ---\n");
+    uint32_t state;
+    dither_init(&state);
+
+    // Average of many dithered samples should converge to the input
+    float input = 0.5f;  // Mid-scale
+    double sum = 0;
+    int N = 100000;
+    for (int i = 0; i < N; i++) {
+        int16_t out = dither_f32_to_i16(input, &state);
+        sum += (double)out;
+    }
+    double avg = sum / N;
+    double expected = input * 32768.0;
+    double error_lsb = fabs(avg - expected);
+    printf("  Expected: %.1f  Average: %.1f  Error: %.2f LSB\n", expected, avg, error_lsb);
+    ASSERT(error_lsb < 2.0, "Dithered average should be within 2 LSB of true value");
+    PASS("Dither preserves signal (unbiased)");
+}
+
 // ===========================================================================
 // Main
 // ===========================================================================
@@ -287,6 +345,9 @@ int main(void)
     test_exciter_on_adds_harmonics();
     test_crossfeed_off_passthrough();
     test_crossfeed_mixes_channels();
+    test_dither_output_range();
+    test_dither_adds_noise();
+    test_dither_preserves_signal();
 
     printf("\n===========================================\n");
     printf("  Results: %d passed, %d failed\n", tests_passed, tests_failed);

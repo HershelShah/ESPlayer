@@ -1,6 +1,7 @@
 #include "audio_pipeline.h"
 #include "audio_eq.h"
 #include "audio_dsp.h"
+#include "audio_dither.h"
 #include "hearing_cal.h"
 #include "config.h"
 #include "sd_manager.h"
@@ -30,16 +31,23 @@ static audio_state_t    s_state        = AUDIO_STATE_IDLE;
 static int              s_current_track = -1;
 static uint8_t          s_volume       = 200;  // 0-255, default ~78%
 static uint32_t         s_underruns    = 0;     // BT callback got no data
+static uint32_t         s_dither_l     = 0;     // TPDF dither state L
+static uint32_t         s_dither_r     = 0;     // TPDF dither state R
 static uint32_t         s_cb_total     = 0;     // Total BT callback invocations
 
 // ---------------------------------------------------------------------------
 // Volume scaling — fixed-point multiply each sample
 // ---------------------------------------------------------------------------
-static void apply_volume(int16_t *samples, int count)
+static void apply_volume_dithered(int16_t *samples, int count)
 {
-    if (s_volume == 255) return;  // Full volume, no scaling
-    for (int i = 0; i < count; i++) {
-        samples[i] = (int16_t)(((int32_t)samples[i] * s_volume) >> 8);
+    // Apply volume in float, then dither back to int16.
+    // This is the single final quantization point in the pipeline.
+    float vol_scale = (float)s_volume / 255.0f;
+    for (int i = 0; i < count; i += 2) {
+        float l = (float)samples[i]     * vol_scale / 32768.0f;
+        float r = (float)samples[i + 1] * vol_scale / 32768.0f;
+        samples[i]     = dither_f32_to_i16(l, &s_dither_l);
+        samples[i + 1] = dither_f32_to_i16(r, &s_dither_r);
     }
 }
 
@@ -220,7 +228,7 @@ static void decode_task(void *arg)
                     audio_dsp_loudness(out_buf, frames, s_volume);
                     audio_dsp_bass_exciter(out_buf, frames);
                     audio_dsp_crossfeed(out_buf, frames);
-                    apply_volume(out_buf, out_samples);
+                    apply_volume_dithered(out_buf, out_samples);
 
                     // Write to ring buffer — block until space available
                     int pcm_bytes = out_samples * sizeof(int16_t);
@@ -275,9 +283,11 @@ esp_err_t audio_pipeline_init(void)
 {
     ESP_LOGI(TAG, "Initialising audio pipeline");
 
-    // Init EQ and DSP blocks
+    // Init EQ, DSP blocks, and dither
     audio_eq_init(AUDIO_SAMPLE_RATE);
     audio_dsp_init(AUDIO_SAMPLE_RATE);
+    dither_init(&s_dither_l);
+    s_dither_r = 0x12345678;  // Different seed for R channel
 
     // Get track list (defined as global in main.c)
     extern track_list_t tracks;
