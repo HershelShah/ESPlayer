@@ -1,0 +1,24 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "sd_manager.c"
+        "ui_display.c"
+        "ui_touch.c"
+        "bt_a2dp_source.c"
+        "audio_pipeline.c"
+        "audio_eq.c"
+        "hearing_cal.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        driver
+        fatfs
+        vfs
+        sdmmc
+        esp_timer
+        nvs_flash
+        esp_driver_ledc
+        bt
+        esp_ringbuf
+        minimp3
+)
