@@ -1,5 +1,6 @@
 #include "audio_pipeline.h"
 #include "audio_eq.h"
+#include "audio_dsp.h"
 #include "hearing_cal.h"
 #include "config.h"
 #include "sd_manager.h"
@@ -212,8 +213,13 @@ static void decode_task(void *arg)
                         out_samples = samples * 2;
                     }
 
-                    // Apply EQ (biquad filters), then volume
-                    audio_eq_process(out_buf, out_samples / 2);
+                    // DSP chain: EQ → Limiter → Loudness → Bass Exciter → Crossfeed → Volume
+                    int frames = out_samples / 2;
+                    audio_eq_process(out_buf, frames);
+                    audio_dsp_limiter(out_buf, frames);
+                    audio_dsp_loudness(out_buf, frames, s_volume);
+                    audio_dsp_bass_exciter(out_buf, frames);
+                    audio_dsp_crossfeed(out_buf, frames);
                     apply_volume(out_buf, out_samples);
 
                     // Write to ring buffer — block until space available
@@ -269,8 +275,9 @@ esp_err_t audio_pipeline_init(void)
 {
     ESP_LOGI(TAG, "Initialising audio pipeline");
 
-    // Init 3-band EQ (flat by default)
+    // Init EQ and DSP blocks
     audio_eq_init(AUDIO_SAMPLE_RATE);
+    audio_dsp_init(AUDIO_SAMPLE_RATE);
 
     // Get track list (defined as global in main.c)
     extern track_list_t tracks;

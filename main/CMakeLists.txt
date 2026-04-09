@@ -8,6 +8,8 @@ idf_component_register(
         "audio_pipeline.c"
         "audio_eq.c"
         "hearing_cal.c"
+        "audio_dsp.c"
+        "dsp_test.c"
     INCLUDE_DIRS
         "."
     REQUIRES

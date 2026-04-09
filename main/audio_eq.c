@@ -138,8 +138,7 @@ void audio_eq_set_band_gain(int band_index, float gain_db)
     if (gain_db < -12.0f) gain_db = -12.0f;
     if (gain_db >  12.0f) gain_db =  12.0f;
     s_profile.bands[band_index].gain_db = gain_db;
-    s_filters[band_index].z1[0] = s_filters[band_index].z1[1] = 0;
-    s_filters[band_index].z2[0] = s_filters[band_index].z2[1] = 0;
+    // Do NOT reset z1/z2 — let filter state decay naturally to avoid clicks
     recompute_filter(band_index);
 }
 
@@ -158,28 +157,37 @@ void audio_eq_process(int16_t *samples, int frame_count)
 {
     if (s_bypass || s_profile.band_count == 0) return;
 
-    for (int b = 0; b < s_profile.band_count; b++) {
-        if (!s_profile.bands[b].enabled || s_profile.bands[b].gain_db == 0.0f)
-            continue;
+    int total = frame_count * 2;
 
-        biquad_t *bq = &s_filters[b];
+    // Process per-sample in float: int16 → float → all biquads → soft-clip → int16
+    // No pre-gain. Float has ~1500dB headroom. Soft clipper at output handles peaks.
+    // This is how DAWs (Ableton, Logic, Pro Tools) handle gain staging.
+    for (int ch = 0; ch < 2; ch++) {
+        for (int i = ch; i < total; i += 2) {
+            float x = (float)samples[i] / 32768.0f;
 
-        for (int ch = 0; ch < 2; ch++) {
-            float z1 = bq->z1[ch];
-            float z2 = bq->z2[ch];
+            // Cascade through all biquad bands
+            for (int b = 0; b < s_profile.band_count; b++) {
+                if (!s_profile.bands[b].enabled || s_profile.bands[b].gain_db == 0.0f)
+                    continue;
 
-            for (int i = ch; i < frame_count * 2; i += 2) {
-                float x = (float)samples[i];
-                float y = bq->b0 * x + z1;
-                z1 = bq->b1 * x - bq->a1 * y + z2;
-                z2 = bq->b2 * x - bq->a2 * y;
-                if (y > 32767.0f)  y = 32767.0f;
-                if (y < -32768.0f) y = -32768.0f;
-                samples[i] = (int16_t)y;
+                biquad_t *bq = &s_filters[b];
+                float y = bq->b0 * x + bq->z1[ch];
+                bq->z1[ch] = bq->b1 * x - bq->a1 * y + bq->z2[ch];
+                bq->z2[ch] = bq->b2 * x - bq->a2 * y;
+                x = y;
             }
 
-            bq->z1[ch] = z1;
-            bq->z2[ch] = z2;
+            // Soft clip (polynomial knee at ±0.95, asymptotes to ±1.0)
+            if (x > 0.95f) {
+                float excess = x - 0.95f;
+                x = 0.95f + 0.05f * tanhf(excess / 0.05f);
+            } else if (x < -0.95f) {
+                float excess = -x - 0.95f;
+                x = -(0.95f + 0.05f * tanhf(excess / 0.05f));
+            }
+
+            samples[i] = (int16_t)(x * 32767.0f);
         }
     }
 }
@@ -326,15 +334,20 @@ void audio_eq_build_hearing_profile(const float *test_freqs, const float *thresh
         // Deviation: how much worse is the user vs reference (anchored)
         float deviation = (thresholds[i] - ref) - anchor;
 
-        // Positive deviation = user needs more volume = boost that freq
-        // Clamp to reasonable range
-        float gain = deviation;
+        // Apply only 55% of correction (matching Sonarworks/AutoEQ best practice)
+        float gain = deviation * 0.55f;
         if (gain < -12.0f) gain = -12.0f;
         if (gain >  12.0f) gain =  12.0f;
 
+        // Frequency-dependent Q: wider for widely-spaced bands, narrower for close ones
+        // 250→500: 1 octave (Q=0.6), 500→1k: 1 octave (Q=0.7), 1k→2k: 1 octave (Q=0.8)
+        // 2k→4k: 1 octave (Q=0.9), 4k→6k: 0.6 oct (Q=1.1), 6k→8k: 0.4 oct (Q=1.1), 8k→12k: 0.6 oct (Q=0.8)
+        static const float q_map[] = { 0.6f, 0.7f, 0.8f, 0.9f, 1.1f, 1.1f, 0.8f, 0.6f };
+        float q = (i < 8) ? q_map[i] : 0.7f;
+
         out->bands[i].freq    = test_freqs[i];
         out->bands[i].gain_db = gain;
-        out->bands[i].q       = 1.5f;  // Moderate Q for smooth correction
+        out->bands[i].q       = q;
         out->bands[i].type    = EQ_FILTER_PEAKING;
         out->bands[i].enabled = (fabsf(gain) > 0.5f);  // Skip negligible corrections
 

@@ -5,7 +5,7 @@
 #include "audio_eq.h"
 
 // Test frequencies for hearing calibration
-#define CAL_NUM_FREQS  6
+#define CAL_NUM_FREQS  8
 extern const float CAL_TEST_FREQS[CAL_NUM_FREQS];
 
 typedef enum {

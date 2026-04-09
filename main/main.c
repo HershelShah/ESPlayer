@@ -15,7 +15,9 @@
 #include "bt_a2dp_source.h"
 #include "audio_pipeline.h"
 #include "audio_eq.h"
+#include "audio_dsp.h"
 #include "hearing_cal.h"
+#include "dsp_test.h"
 
 static const char *TAG = "main";
 
@@ -223,15 +225,18 @@ static void draw_now_playing(void)
     ui_display_string((DISPLAY_WIDTH - pw) / 2, 136, prof_label, COLOR_WHITE, prof_col);
     ui_display_string(20, 152, "tap to switch", COLOR_BLACK, prof_col);
 
-    // Show what profiles are available
-    char avail[48];
-    if (s_has_hearing)
-        snprintf(avail, sizeof(avail), "FLAT / EDM / HEARING");
-    else
-        snprintf(avail, sizeof(avail), "FLAT / EDM  (calibrate for HEARING)");
-    int aw = (int)strlen(avail) * 8;
-    ui_display_string((DISPLAY_WIDTH - aw) / 2, 178, avail,
-                      RGB565(140, 140, 140), COLOR_BLACK);
+    // --- DSP toggle buttons ---
+    // BASS+ button
+    bool exc = audio_dsp_get_exciter();
+    ui_display_fill_rect(20, 175, 130, 25, exc ? COLOR_ORANGE : RGB565(60, 60, 60));
+    ui_display_string(40, 181, exc ? "BASS+ ON" : "BASS+ OFF", COLOR_WHITE,
+                      exc ? COLOR_ORANGE : RGB565(60, 60, 60));
+
+    // XFEED button
+    bool xf = audio_dsp_get_crossfeed();
+    ui_display_fill_rect(170, 175, 130, 25, xf ? COLOR_CYAN : RGB565(60, 60, 60));
+    ui_display_string(190, 181, xf ? "XFEED ON" : "XFEED OFF", COLOR_WHITE,
+                      xf ? COLOR_CYAN : RGB565(60, 60, 60));
 
     // Band visualization (compact)
     const eq_profile_t *prof = audio_eq_get_profile();
@@ -242,10 +247,10 @@ static void draw_now_playing(void)
             int bar_h = (int)(fabsf(g) * 1.5f);
             if (bar_h > 15) bar_h = 15;
             uint16_t col = (g > 0) ? COLOR_GREEN : COLOR_RED;
-            int bar_y = (g > 0) ? 205 - bar_h : 205;
+            int bar_y = (g > 0) ? 215 - bar_h : 215;
             if (bar_h > 0)
                 ui_display_fill_rect(bx, bar_y, 20, bar_h, col);
-            ui_display_fill_rect(bx, 205, 20, 1, RGB565(60, 60, 60));
+            ui_display_fill_rect(bx, 215, 20, 1, RGB565(60, 60, 60));
         }
     }
 
@@ -256,7 +261,7 @@ static void draw_now_playing(void)
     size_t heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     snprintf(stats, sizeof(stats), "Heap:%uKB Ur:%lu/%lu",
              (unsigned)(heap / 1024), (unsigned long)ur, (unsigned long)total);
-    ui_display_string(10, 225, stats, COLOR_GREEN, COLOR_BLACK);
+    ui_display_string(10, 230, stats, COLOR_GREEN, COLOR_BLACK);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +322,7 @@ static void draw_calibrate(void)
 
         // Done frequencies shown as dots
         for (int i = 0; i < CAL_NUM_FREQS; i++) {
-            int dx = 80 + i * 30;
+            int dx = 40 + i * 32;
             uint16_t c = cal->freq_done[i] ? COLOR_GREEN :
                         (i == cal->current_freq_idx) ? COLOR_YELLOW : RGB565(60,60,60);
             ui_display_fill_rect(dx, 230, 16, 8, c);
@@ -568,6 +573,19 @@ void app_main(void)
                     cycle_profile();
                     ESP_LOGI(TAG, "EQ profile: %s", profile_name());
                     s_screen_dirty = true;
+                } else if (pt.y >= 175 && pt.y <= 200) {
+                    // DSP toggle buttons
+                    if (pt.x < 155) {
+                        // BASS+ toggle
+                        audio_dsp_set_exciter(!audio_dsp_get_exciter());
+                        ESP_LOGI(TAG, "Bass exciter: %s", audio_dsp_get_exciter() ? "ON" : "OFF");
+                        s_screen_dirty = true;
+                    } else {
+                        // XFEED toggle
+                        audio_dsp_set_crossfeed(!audio_dsp_get_crossfeed());
+                        ESP_LOGI(TAG, "Crossfeed: %s", audio_dsp_get_crossfeed() ? "ON" : "OFF");
+                        s_screen_dirty = true;
+                    }
                 }
                 break;
 

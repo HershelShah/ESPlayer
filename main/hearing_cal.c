@@ -13,7 +13,7 @@ static const char *TAG = "hearing_cal";
 
 // Test frequencies: covers the range most affected by hearing loss
 const float CAL_TEST_FREQS[CAL_NUM_FREQS] = {
-    250.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 12000.0f
+    250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 6000.0f, 8000.0f, 12000.0f
 };
 
 static cal_status_t s_status;
