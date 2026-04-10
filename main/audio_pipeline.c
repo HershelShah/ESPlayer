@@ -46,8 +46,8 @@ static void apply_volume_dithered(int16_t *samples, int count)
     for (int i = 0; i < count; i += 2) {
         float l = (float)samples[i]     * vol_scale / 32768.0f;
         float r = (float)samples[i + 1] * vol_scale / 32768.0f;
-        samples[i]     = dither_noise_shaped(l, &s_dither_l);
-        samples[i + 1] = dither_noise_shaped(r, &s_dither_r);
+        samples[i]     = dither_tpdf(l, &s_dither_l);
+        samples[i + 1] = dither_tpdf(r, &s_dither_r);
     }
 }
 

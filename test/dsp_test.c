@@ -233,7 +233,7 @@ static void test_dither_output_range(void)
     int clipped = 0;
     for (int i = 0; i < 10000; i++) {
         float x = sinf(2.0f * M_PI * 997.0f * i / SR);
-        int16_t out = dither_noise_shaped(x * 0.95f, &state);
+        int16_t out = dither_tpdf(x * 0.95f, &state);
         if (out == 32767 || out == -32768) clipped++;
     }
     printf("  Clipped: %d / 10000\n", clipped);
@@ -250,7 +250,7 @@ static void test_dither_adds_noise(void)
     // Silence input — output should be dither noise, not all zeros
     int nonzero = 0;
     for (int i = 0; i < 1000; i++) {
-        int16_t out = dither_noise_shaped(0.0f, &state);
+        int16_t out = dither_tpdf(0.0f, &state);
         if (out != 0) nonzero++;
     }
     printf("  Nonzero samples from silence: %d / 1000\n", nonzero);
@@ -269,7 +269,7 @@ static void test_dither_preserves_signal(void)
     double sum = 0;
     int N = 100000;
     for (int i = 0; i < N; i++) {
-        int16_t out = dither_noise_shaped(input, &state);
+        int16_t out = dither_tpdf(input, &state);
         sum += (double)out;
     }
     double avg = sum / N;
