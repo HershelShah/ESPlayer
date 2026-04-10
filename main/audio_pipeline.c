@@ -221,12 +221,11 @@ static void decode_task(void *arg)
                         out_samples = samples * 2;
                     }
 
-                    // DSP chain: EQ → Limiter → Loudness → Exciter → Crossfeed → Volume
+                    // DSP chain: EQ → Limiter → Loudness → Crossfeed → Volume
                     int frames = out_samples / 2;
                     audio_eq_process(out_buf, frames);
                     audio_dsp_limiter(out_buf, frames);
                     audio_dsp_loudness(out_buf, frames, s_volume);
-                    audio_dsp_bass_exciter(out_buf, frames);
                     audio_dsp_crossfeed(out_buf, frames);
                     apply_volume_dithered(out_buf, out_samples);
 

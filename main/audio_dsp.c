@@ -7,7 +7,6 @@
 // Shared state
 // ---------------------------------------------------------------------------
 static int   s_sr;
-static bool  s_exciter_on  = false;
 static bool  s_crossfeed_on = false;
 
 // audio_dsp_init() is at the end of this file (needs all statics declared first)
@@ -161,56 +160,6 @@ void audio_dsp_loudness(int16_t *samples, int frame_count, uint8_t volume)
 }
 
 // ===========================================================================
-// 3. Bass Harmonic Exciter
-// ===========================================================================
-//
-// Isolate sub-bass (<80Hz), soft-clip to generate harmonics, highpass to
-// remove fundamental, mix back at -10dB.
-
-static float bass_state[2] = {0};  // 1-pole LP state for exciter
-
-// Soft clipper: cubic approximation
-static float soft_clip(float x)
-{
-    if (x > 1.0f)  return 1.0f;
-    if (x < -1.0f) return -1.0f;
-    return x * (1.5f - 0.5f * x * x);  // Cubic soft clip
-}
-
-void audio_dsp_bass_exciter(int16_t *samples, int frame_count)
-{
-    if (!s_exciter_on) return;
-
-    // Simple approach: lowpass to isolate bass, soft-clip to add warmth/harmonics,
-    // blend with original. No HP needed — the clipping naturally adds upper harmonics.
-    const float mix = 0.3f;  // Blend amount of distorted bass
-
-    for (int i = 0; i < frame_count * 2; i++) {
-        int ch = i & 1;
-        float x = (float)samples[i] / 32768.0f;
-
-        // Lowpass to get bass content (simple 1-pole at ~200Hz for warmth)
-        // alpha = 2*pi*200/44100 / (1 + 2*pi*200/44100) ≈ 0.028
-        bass_state[ch] += 0.028f * (x - bass_state[ch]);
-        float bass = bass_state[ch];
-
-        // Soft-clip the bass to generate harmonics (2nd, 3rd order)
-        float driven = soft_clip(bass * 3.0f);
-
-        // Mix: original + warm bass harmonics
-        float out = x + (driven - bass) * mix;  // Add only the harmonic content
-
-        out *= 32768.0f;
-        if (out > 32767.0f)  out = 32767.0f;
-        if (out < -32768.0f) out = -32768.0f;
-        samples[i] = (int16_t)out;
-    }
-}
-
-void audio_dsp_set_exciter(bool enabled)  { s_exciter_on = enabled; }
-bool audio_dsp_get_exciter(void)          { return s_exciter_on; }
-
-// ===========================================================================
 // 4. Crossfeed / BS2B
 // ===========================================================================
 //
@@ -270,7 +219,6 @@ void audio_dsp_init(int sample_rate)
     s_loud_lo.b0 = 1.0f;
     s_loud_hi.b0 = 1.0f;
     s_loud_last_vol = 255;
-    bass_state[0] = bass_state[1] = 0.0f;
     s_xf_state_l = 0.0f;
     s_xf_state_r = 0.0f;
 }

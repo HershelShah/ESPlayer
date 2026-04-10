@@ -235,17 +235,10 @@ static void draw_now_playing(void)
     ui_display_string((DISPLAY_WIDTH - pw) / 2, 136, prof_label, COLOR_WHITE, prof_col);
     ui_display_string(20, 152, "tap to switch", COLOR_BLACK, prof_col);
 
-    // --- DSP toggle buttons ---
-    // BASS+ button
-    bool exc = audio_dsp_get_exciter();
-    ui_display_fill_rect(20, 175, 130, 25, exc ? COLOR_ORANGE : RGB565(60, 60, 60));
-    ui_display_string(40, 181, exc ? "BASS+ ON" : "BASS+ OFF", COLOR_WHITE,
-                      exc ? COLOR_ORANGE : RGB565(60, 60, 60));
-
-    // XFEED button
+    // --- DSP toggle button ---
     bool xf = audio_dsp_get_crossfeed();
-    ui_display_fill_rect(170, 175, 130, 25, xf ? COLOR_CYAN : RGB565(60, 60, 60));
-    ui_display_string(190, 181, xf ? "XFEED ON" : "XFEED OFF", COLOR_WHITE,
+    ui_display_fill_rect(60, 175, 200, 25, xf ? COLOR_CYAN : RGB565(60, 60, 60));
+    ui_display_string(100, 181, xf ? "CROSSFEED ON" : "CROSSFEED OFF", COLOR_WHITE,
                       xf ? COLOR_CYAN : RGB565(60, 60, 60));
 
     // Band visualization (compact)
@@ -584,18 +577,10 @@ void app_main(void)
                     ESP_LOGI(TAG, "EQ profile: %s", profile_name());
                     s_screen_dirty = true;
                 } else if (pt.y >= 175 && pt.y <= 200) {
-                    // DSP toggle buttons
-                    if (pt.x < 155) {
-                        // BASS+ toggle
-                        audio_dsp_set_exciter(!audio_dsp_get_exciter());
-                        ESP_LOGI(TAG, "Bass exciter: %s", audio_dsp_get_exciter() ? "ON" : "OFF");
-                        s_screen_dirty = true;
-                    } else {
-                        // XFEED toggle
-                        audio_dsp_set_crossfeed(!audio_dsp_get_crossfeed());
-                        ESP_LOGI(TAG, "Crossfeed: %s", audio_dsp_get_crossfeed() ? "ON" : "OFF");
-                        s_screen_dirty = true;
-                    }
+                    // Crossfeed toggle
+                    audio_dsp_set_crossfeed(!audio_dsp_get_crossfeed());
+                    ESP_LOGI(TAG, "Crossfeed: %s", audio_dsp_get_crossfeed() ? "ON" : "OFF");
+                    s_screen_dirty = true;
                 }
                 break;
 

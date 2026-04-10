@@ -186,51 +186,6 @@ static void test_limiter_reduces_loud(void)
     PASS("Limiter reduces loud signal");
 }
 
-static void test_exciter_off_passthrough(void)
-{
-    printf("\n--- test_exciter_off_passthrough ---\n");
-    int16_t buf[TEST_FRAMES * 2], ref[TEST_FRAMES * 2];
-    gen_sine(buf, TEST_FRAMES, 100.0f, 16000.0f);
-    memcpy(ref, buf, sizeof(buf));
-
-    audio_dsp_init(SR);
-    audio_dsp_set_exciter(false);
-    audio_dsp_bass_exciter(buf, TEST_FRAMES);
-
-    ASSERT(memcmp(buf, ref, sizeof(buf)) == 0, "Exciter OFF should be pass-through");
-    PASS("Exciter OFF is pass-through");
-}
-
-static void test_exciter_on_adds_harmonics(void)
-{
-    printf("\n--- test_exciter_on_adds_harmonics ---\n");
-    int16_t buf[TEST_FRAMES * 2], ref[TEST_FRAMES * 2];
-    gen_sine(buf, TEST_FRAMES, 80.0f, 16000.0f);
-    memcpy(ref, buf, sizeof(buf));
-
-    audio_dsp_init(SR);
-    audio_dsp_set_exciter(true);
-    audio_dsp_bass_exciter(buf, TEST_FRAMES);
-
-    // Signal should be different when exciter is on
-    int diff = 0;
-    for (int i = 0; i < TEST_FRAMES * 2; i++) {
-        if (buf[i] != ref[i]) diff++;
-    }
-    printf("  Modified samples: %d / %d\n", diff, TEST_FRAMES * 2);
-    ASSERT(diff > TEST_FRAMES, "Exciter ON should modify bass signal");
-
-    // RMS should increase slightly (harmonics added)
-    float rms_before = rms(ref, TEST_FRAMES, 0);
-    float rms_after = rms(buf, TEST_FRAMES, 0);
-    float gain_db = 20.0f * log10f(rms_after / rms_before);
-    printf("  RMS: %.0f → %.0f (gain: %+.1f dB)\n", rms_before, rms_after, gain_db);
-    // Should not crush or massively boost
-    ASSERT(gain_db > -3.0f && gain_db < 6.0f, "Exciter gain should be modest");
-    PASS("Exciter adds harmonics to bass");
-    audio_dsp_set_exciter(false);
-}
-
 static void test_crossfeed_off_passthrough(void)
 {
     printf("\n--- test_crossfeed_off_passthrough ---\n");
@@ -341,8 +296,6 @@ int main(void)
     test_eq_no_clipping_hot_signal();
     test_limiter_quiet_passthrough();
     test_limiter_reduces_loud();
-    test_exciter_off_passthrough();
-    test_exciter_on_adds_harmonics();
     test_crossfeed_off_passthrough();
     test_crossfeed_mixes_channels();
     test_dither_output_range();
