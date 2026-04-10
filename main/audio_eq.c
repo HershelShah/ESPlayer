@@ -27,53 +27,57 @@ static bool         s_bypass = false;
 // Coefficient computation (Bristow-Johnson Audio EQ Cookbook)
 // ---------------------------------------------------------------------------
 
+// Coefficient computation in DOUBLE precision, stored as float.
+// Double precision eliminates rounding errors for low-frequency filters
+// (e.g. 60Hz shelf at 44100Hz where cos(w0) ≈ 0.99996).
+
 static void compute_peaking(biquad_t *bq, float fs, float f0, float gain_db, float Q)
 {
-    float A  = powf(10.0f, gain_db / 20.0f);
-    float w0 = 2.0f * M_PI * f0 / fs;
-    float cw = cosf(w0);
-    float alpha = sinf(w0) / (2.0f * Q);
+    double A  = pow(10.0, (double)gain_db / 20.0);
+    double w0 = 2.0 * M_PI * (double)f0 / (double)fs;
+    double cw = cos(w0);
+    double alpha = sin(w0) / (2.0 * (double)Q);
 
-    float a0 = 1.0f + alpha / A;
-    bq->b0 = (1.0f + alpha * A) / a0;
-    bq->b1 = (-2.0f * cw)       / a0;
-    bq->b2 = (1.0f - alpha * A) / a0;
-    bq->a1 = (-2.0f * cw)       / a0;
-    bq->a2 = (1.0f - alpha / A) / a0;
+    double a0 = 1.0 + alpha / A;
+    bq->b0 = (float)((1.0 + alpha * A) / a0);
+    bq->b1 = (float)((-2.0 * cw)       / a0);
+    bq->b2 = (float)((1.0 - alpha * A) / a0);
+    bq->a1 = (float)((-2.0 * cw)       / a0);
+    bq->a2 = (float)((1.0 - alpha / A) / a0);
 }
 
 static void compute_low_shelf(biquad_t *bq, float fs, float f0, float gain_db, float Q)
 {
-    float A   = powf(10.0f, gain_db / 40.0f);
-    float w0  = 2.0f * M_PI * f0 / fs;
-    float cw  = cosf(w0);
-    float sw  = sinf(w0);
-    float alpha = sw / (2.0f * Q);
-    float sqA = sqrtf(A);
+    double A   = pow(10.0, (double)gain_db / 40.0);
+    double w0  = 2.0 * M_PI * (double)f0 / (double)fs;
+    double cw  = cos(w0);
+    double sw  = sin(w0);
+    double alpha = sw / (2.0 * (double)Q);
+    double sqA = sqrt(A);
 
-    float a0 =        (A + 1) + (A - 1) * cw + 2 * sqA * alpha;
-    bq->b0 =     A * ((A + 1) - (A - 1) * cw + 2 * sqA * alpha) / a0;
-    bq->b1 = 2 * A * ((A - 1) - (A + 1) * cw                  ) / a0;
-    bq->b2 =     A * ((A + 1) - (A - 1) * cw - 2 * sqA * alpha) / a0;
-    bq->a1 =    -2 * ((A - 1) + (A + 1) * cw                  ) / a0;
-    bq->a2 =         ((A + 1) + (A - 1) * cw - 2 * sqA * alpha) / a0;
+    double a0 =        (A + 1) + (A - 1) * cw + 2 * sqA * alpha;
+    bq->b0 = (float)(     A * ((A + 1) - (A - 1) * cw + 2 * sqA * alpha) / a0);
+    bq->b1 = (float)( 2 * A * ((A - 1) - (A + 1) * cw                  ) / a0);
+    bq->b2 = (float)(     A * ((A + 1) - (A - 1) * cw - 2 * sqA * alpha) / a0);
+    bq->a1 = (float)(    -2 * ((A - 1) + (A + 1) * cw                  ) / a0);
+    bq->a2 = (float)(         ((A + 1) + (A - 1) * cw - 2 * sqA * alpha) / a0);
 }
 
 static void compute_high_shelf(biquad_t *bq, float fs, float f0, float gain_db, float Q)
 {
-    float A   = powf(10.0f, gain_db / 40.0f);
-    float w0  = 2.0f * M_PI * f0 / fs;
-    float cw  = cosf(w0);
-    float sw  = sinf(w0);
-    float alpha = sw / (2.0f * Q);
-    float sqA = sqrtf(A);
+    double A   = pow(10.0, (double)gain_db / 40.0);
+    double w0  = 2.0 * M_PI * (double)f0 / (double)fs;
+    double cw  = cos(w0);
+    double sw  = sin(w0);
+    double alpha = sw / (2.0 * (double)Q);
+    double sqA = sqrt(A);
 
-    float a0 =        (A + 1) - (A - 1) * cw + 2 * sqA * alpha;
-    bq->b0 =     A * ((A + 1) + (A - 1) * cw + 2 * sqA * alpha) / a0;
-    bq->b1 =-2 * A * ((A - 1) + (A + 1) * cw                  ) / a0;
-    bq->b2 =     A * ((A + 1) + (A - 1) * cw - 2 * sqA * alpha) / a0;
-    bq->a1 =     2 * ((A - 1) - (A + 1) * cw                  ) / a0;
-    bq->a2 =         ((A + 1) - (A - 1) * cw - 2 * sqA * alpha) / a0;
+    double a0 =        (A + 1) - (A - 1) * cw + 2 * sqA * alpha;
+    bq->b0 = (float)(     A * ((A + 1) + (A - 1) * cw + 2 * sqA * alpha) / a0);
+    bq->b1 = (float)(-2 * A * ((A - 1) + (A + 1) * cw                  ) / a0);
+    bq->b2 = (float)(     A * ((A + 1) + (A - 1) * cw - 2 * sqA * alpha) / a0);
+    bq->a1 = (float)(     2 * ((A - 1) - (A + 1) * cw                  ) / a0);
+    bq->a2 = (float)(         ((A + 1) - (A - 1) * cw - 2 * sqA * alpha) / a0);
 }
 
 static void recompute_filter(int idx)
