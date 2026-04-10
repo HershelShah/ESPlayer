@@ -35,7 +35,7 @@ def run_all_measurements() -> dict:
         r = measure_thd_n(quantized, 44100, 997.0)
         key = f'thd_n_{name}'
         results[key] = r
-        print(f"  {name:15s}: THD+N={r['thd_n_db']:.1f}dB  SINAD={r['sinad_db']:.1f}dB  ENOB={r['enob']:.1f}")
+        print(f"  {name:15s}: THD+N={r['thd_n_db']:.1f}dB  SINAD={r['sinad_db']:.1f}dB  ENOB={r['enob']:.1f}  inband_noise={r['inband_noise_db']:.1f}dB")
 
     # --- Dynamic Range ---
     print("\n=== Dynamic Range ===")

@@ -59,16 +59,18 @@ def tpdf_dither_16bit(x: np.ndarray) -> np.ndarray:
 
 
 def noise_shaped_dither_16bit(x: np.ndarray) -> np.ndarray:
-    """First-order noise-shaped dither."""
+    """1st-order noise-shaped dither (matches C implementation).
+    NTF(z) = 1 - z^-1 → highpass noise shape.
+    Subtracts previous error to push quantization noise above 10kHz."""
     scaled = x * 32768.0
     output = np.zeros_like(scaled)
     error = 0.0
     for i in range(len(scaled)):
-        dither = np.random.uniform(-0.5, 0.5) + np.random.uniform(-0.5, 0.5)
-        val = scaled[i] - error + dither
-        quantized = np.round(val)
+        dither = np.random.uniform(-1, 1) + np.random.uniform(-1, 1)
+        shaped = scaled[i] - error + dither  # SUBTRACT error
+        quantized = np.round(shaped)
         quantized = np.clip(quantized, -32768, 32767)
-        error = quantized - scaled[i]
+        error = quantized - shaped  # error of SHAPED signal
         output[i] = quantized
     return output / 32768.0
 
@@ -103,11 +105,18 @@ def measure_thd_n(samples: np.ndarray, fs: int = 44100,
     sinad_db = 10 * np.log10(fund_power / (nd_power + 1e-30))
     enob = (sinad_db - 1.76) / 6.02
 
+    # In-band noise (20-4000 Hz) — key metric for noise-shaped dither
+    inband_mask = (freqs >= 20) & (freqs <= 4000)
+    fund_mask_inband = (freqs >= fundamental_hz - 10) & (freqs <= fundamental_hz + 10)
+    inband_power = np.sum(spectrum[inband_mask & ~fund_mask_inband] ** 2)
+    inband_noise_db = 10 * np.log10(inband_power + 1e-30)
+
     return {
         'thd_n_db': 20 * np.log10(thd_n_ratio + 1e-20),
         'thd_n_percent': thd_n_ratio * 100,
         'sinad_db': sinad_db,
         'enob': enob,
+        'inband_noise_db': inband_noise_db,
     }
 
 
