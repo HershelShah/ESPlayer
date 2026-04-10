@@ -221,11 +221,13 @@ static void decode_task(void *arg)
                         out_samples = samples * 2;
                     }
 
-                    // DSP chain: EQ → Limiter → Loudness → Crossfeed → Volume
+                    // DSP chain: EQ → Loudness → Limiter → Crossfeed → Volume
+                    // Loudness before limiter so limiter catches loudness boosts.
+                    // Crossfeed after limiter (only redistributes, no level change).
                     int frames = out_samples / 2;
                     audio_eq_process(out_buf, frames);
-                    audio_dsp_limiter(out_buf, frames);
                     audio_dsp_loudness(out_buf, frames, s_volume);
+                    audio_dsp_limiter(out_buf, frames);
                     audio_dsp_crossfeed(out_buf, frames);
                     apply_volume_dithered(out_buf, out_samples);
 
