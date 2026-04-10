@@ -34,26 +34,140 @@ from metrics import measure_thd_n, measure_aliasing, detect_idle_tones
 
 ESP32_MAC = "A4:F0:0F:5E:A4:9A"
 BLUEALSA_DEV = f"bluealsa:DEV={ESP32_MAC},PROFILE=a2dp"
+SERIAL_PORT = "/dev/ttyUSB0"
+SERIAL_BAUD = 115200
 CAPTURE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def capture_serial(filename: str) -> str:
+    """Capture processed PCM from ESP32 serial port. No BT needed."""
+    import serial as pyserial
+
+    path = os.path.join(CAPTURE_DIR, filename)
+    print(f"Capturing PCM from serial {SERIAL_PORT} → {path}")
+    print(f"  Resetting ESP32 (test dump runs at boot)...")
+
+    s = pyserial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=2)
+
+    # Reset ESP32 via DTR/RTS toggle — test dump runs automatically on boot
+    s.dtr = False
+    s.rts = True
+    time.sleep(0.1)
+    s.rts = False
+    time.sleep(0.5)
+    s.read(s.in_waiting or 1)  # Flush boot garbage
+
+    # Collect PCM hex lines
+    samples_l = []
+    samples_r = []
+    timeout_at = time.time() + 30  # 30s — boot + 2s dump + margin
+    started = False
+
+    while time.time() < timeout_at:
+        line = s.readline()
+        if not line:
+            if started:
+                break  # No data for 1s after starting = done
+            continue
+
+        text = line.decode('utf-8', errors='replace').strip()
+        if text == "PCM:END":
+            print(f"  Received END marker")
+            break
+        if text.startswith("PCM:") and len(text) == 12:  # "PCM:" + 8 hex chars
+            if not started:
+                started = True
+                print(f"  Receiving samples...")
+            hex_data = text[4:]
+            l_val = int(hex_data[0:4], 16)
+            r_val = int(hex_data[4:8], 16)
+            # Convert from uint16 to int16
+            if l_val > 32767: l_val -= 65536
+            if r_val > 32767: r_val -= 65536
+            samples_l.append(l_val)
+            samples_r.append(r_val)
+
+    s.close()
+
+    if len(samples_l) == 0:
+        print(f"  ERROR: No PCM data received")
+        print(f"  Make sure ESP32 is playing music and try again")
+        sys.exit(1)
+
+    # Write WAV
+    import struct
+    f = wave.open(path, 'w')
+    f.setnchannels(2)
+    f.setsampwidth(2)
+    f.setframerate(44100)
+    for l, r in zip(samples_l, samples_r):
+        f.writeframes(struct.pack('<hh', l, r))
+    f.close()
+
+    duration = len(samples_l) / 44100
+    print(f"  Captured: {len(samples_l)} frames ({duration:.1f}s)")
+    return path
+
+
 def capture(filename: str, duration: int = 10) -> str:
-    """Record from bluealsa to WAV. Returns full path."""
+    """Record from ESP32 via bluealsa (root) or pw-record (user). Returns full path."""
     path = os.path.join(CAPTURE_DIR, filename)
     print(f"Recording {duration}s from ESP32 → {path}")
-    print(f"  Device: {BLUEALSA_DEV}")
 
     # Kill any existing bluealsa-aplay that might hold the PCM
     subprocess.run(["killall", "bluealsa-aplay"], capture_output=True)
     time.sleep(0.5)
 
-    result = subprocess.run(
-        ["arecord", "-D", BLUEALSA_DEV, "-f", "cd", "-d", str(duration),
-         "-t", "wav", path],
-        capture_output=True, text=True, timeout=duration + 10
-    )
-    if result.returncode != 0:
-        print(f"  ERROR: arecord failed: {result.stderr.strip()}")
+    # Try bluealsa first (needs root), fall back to pw-record
+    if os.geteuid() == 0:
+        print(f"  Using: bluealsa (root)")
+        result = subprocess.run(
+            ["arecord", "-D", BLUEALSA_DEV, "-f", "cd", "-d", str(duration),
+             "-t", "wav", path],
+            capture_output=True, text=True, timeout=duration + 10
+        )
+    else:
+        print(f"  Using: pw-record (no root needed)")
+        # Restart PipeWire session if not running
+        subprocess.run(["systemctl", "--user", "start", "pipewire-pulse", "wireplumber"],
+                       capture_output=True)
+        time.sleep(1)
+
+        # Set BT card profile to audio-gateway
+        subprocess.run(["pw-cli", "set-param", "52", "Profile",
+                        '{ index: 1, name: "audio-gateway", save: true }'],
+                       capture_output=True)
+        time.sleep(1)
+
+        # Find the bluez input node
+        import json
+        pw_dump = subprocess.run(["pw-dump"], capture_output=True, text=True)
+        target = None
+        if pw_dump.returncode == 0:
+            try:
+                for obj in json.loads(pw_dump.stdout):
+                    props = obj.get('info', {}).get('props', {})
+                    nn = props.get('node.name', '')
+                    if 'bluez' in nn and 'input' in nn:
+                        target = str(obj['id'])
+                        break
+            except Exception:
+                pass
+
+        cmd = ["timeout", str(duration + 2), "pw-record", "--format", "s16",
+               "--rate", "44100", "--channels", "2"]
+        if target:
+            cmd += ["--target", target]
+            print(f"  Target node: {target}")
+        cmd.append(path)
+
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=duration + 10)
+
+    if not os.path.exists(path) or os.path.getsize(path) < 1000:
+        print(f"  ERROR: Capture failed or file too small")
+        if hasattr(result, 'stderr') and result.stderr:
+            print(f"  {result.stderr.strip()[:200]}")
         sys.exit(1)
 
     size = os.path.getsize(path)
@@ -231,11 +345,13 @@ def compare(results_a: dict, results_b: dict, label_a: str, label_b: str):
 
 def main():
     parser = argparse.ArgumentParser(description='ESP32 Audio Capture & Analysis')
-    parser.add_argument('--a', type=str, help='First WAV file (or capture with --label)')
+    parser.add_argument('--a', type=str, help='First WAV file for comparison')
     parser.add_argument('--b', type=str, help='Second WAV file for comparison')
     parser.add_argument('--label', type=str, help='Label for capture (e.g. "flat", "edm")')
     parser.add_argument('--duration', type=int, default=10, help='Capture duration (seconds)')
-    parser.add_argument('--no-capture', action='store_true', help='Skip capture, analyze existing files')
+    parser.add_argument('--serial', action='store_true',
+                        help='Capture via serial (no sudo, no BT needed)')
+    parser.add_argument('--no-capture', action='store_true', help='Skip capture, analyze existing')
     args = parser.parse_args()
 
     if args.a and args.b:
@@ -245,16 +361,21 @@ def main():
         compare(r_a, r_b, label_a, label_b)
 
     elif args.label:
-        # Capture with label
         filename = f"capture_{args.label}.wav"
-        path = capture(filename, args.duration)
+        if args.serial:
+            path = capture_serial(filename)
+        else:
+            path = capture(filename, args.duration)
         analyze(path, args.label)
         print(f"\nSaved as {filename}")
-        print(f"To compare: sudo python {__file__} --a capture_X.wav --b capture_Y.wav")
+        print(f"Compare: uv run python {__file__} --a capture_X.wav --b capture_Y.wav")
 
     elif not args.no_capture:
-        # Single capture + analysis
-        path = capture("capture_latest.wav", args.duration)
+        filename = "capture_latest.wav"
+        if args.serial:
+            path = capture_serial(filename)
+        else:
+            path = capture(filename, args.duration)
         analyze(path, "latest capture")
 
     else:

@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -34,6 +35,12 @@ static uint32_t         s_underruns    = 0;     // BT callback got no data
 static dither_state_t   s_dither_l;              // Noise-shaped dither state L
 static dither_state_t   s_dither_r;              // Noise-shaped dither state R
 static uint32_t         s_cb_total     = 0;     // Total BT callback invocations
+
+// Serial PCM dump — captures processed audio for analysis on host.
+// Set s_dump_remaining > 0 to start dumping. Frames are sent as
+// base64-encoded binary lines prefixed with "PCM:" for easy parsing.
+static int              s_dump_remaining = 0;
+#define DUMP_FRAMES     (44100 * 10)  // 10 seconds at 44.1kHz
 
 // ---------------------------------------------------------------------------
 // Volume scaling — fixed-point multiply each sample
@@ -231,6 +238,22 @@ static void decode_task(void *arg)
                     audio_dsp_crossfeed(out_buf, frames);
                     apply_volume_dithered(out_buf, out_samples);
 
+                    // Serial PCM dump (if active)
+                    if (s_dump_remaining > 0) {
+                        int to_dump = out_samples / 2;  // stereo frames
+                        if (to_dump > s_dump_remaining) to_dump = s_dump_remaining;
+                        // Print as raw hex: 4 hex chars per int16 sample, L+R interleaved
+                        for (int d = 0; d < to_dump * 2; d += 2) {
+                            printf("PCM:%04X%04X\n",
+                                   (uint16_t)out_buf[d], (uint16_t)out_buf[d + 1]);
+                        }
+                        s_dump_remaining -= to_dump;
+                        if (s_dump_remaining <= 0) {
+                            printf("PCM:END\n");
+                            ESP_LOGI(TAG, "PCM dump complete");
+                        }
+                    }
+
                     // Write to ring buffer — block until space available
                     int pcm_bytes = out_samples * sizeof(int16_t);
                     int written = 0;
@@ -385,4 +408,78 @@ void audio_pipeline_get_stats(uint32_t *underruns, uint32_t *total)
 {
     *underruns = s_underruns;
     *total = s_cb_total;
+}
+
+void audio_pipeline_start_pcm_dump(void)
+{
+    s_dump_remaining = DUMP_FRAMES;
+    ESP_LOGI(TAG, "Starting PCM dump (%d frames)", DUMP_FRAMES);
+}
+
+// Generate a test tone, run it through the DSP chain, dump to serial.
+// No BT/SD/music needed — pure DSP measurement.
+void audio_pipeline_test_dump(void)
+{
+    ESP_LOGI(TAG, "Generating test tone + DSP dump (997Hz, -3dBFS, 2s)");
+
+    // Init DSP (in case not done yet)
+    audio_eq_init(AUDIO_SAMPLE_RATE);
+    audio_dsp_init(AUDIO_SAMPLE_RATE);
+    dither_init(&s_dither_l);
+    dither_init(&s_dither_r);
+    s_dither_r.lfsr = 0x12345678;
+
+    // Generate 2s of audio, process through DSP, dump at reduced rate.
+    // Serial @ 115200 baud can handle ~800 lines/sec.
+    // We output every 4th sample = 11025 lines/sec... still too fast.
+    // Instead: process full-rate but only dump 8820 samples (0.2s worth)
+    // after 0.5s warmup. This gives enough data for FFT analysis.
+    int total_frames = AUDIO_SAMPLE_RATE * 1;  // 1 second total
+    int warmup_frames = AUDIO_SAMPLE_RATE / 4; // 0.25s warmup (filter settle)
+    int dump_frames = 8820;                     // 0.2s to dump (enough for FFT)
+    int chunk = 256;
+    static int16_t buf[256 * 2];
+    float phase = 0.0f;
+    float phase_inc = 2.0f * 3.14159265f * 997.0f / (float)AUDIO_SAMPLE_RATE;
+    float amp = 32768.0f * 0.707f;  // -3 dBFS
+
+    int frames_done = 0;
+    int dumped = 0;
+    printf("PCM:START\n");
+    fflush(stdout);
+
+    for (int done = 0; done < total_frames; done += chunk) {
+        int n = chunk;
+        if (done + n > total_frames) n = total_frames - done;
+
+        // Generate stereo 997Hz sine
+        for (int i = 0; i < n; i++) {
+            int16_t val = (int16_t)(sinf(phase) * amp);
+            buf[i * 2]     = val;
+            buf[i * 2 + 1] = val;
+            phase += phase_inc;
+            if (phase >= 2.0f * 3.14159265f) phase -= 2.0f * 3.14159265f;
+        }
+
+        // Run through DSP chain
+        audio_eq_process(buf, n);
+        audio_dsp_loudness(buf, n, s_volume);
+        audio_dsp_limiter(buf, n);
+        audio_dsp_crossfeed(buf, n);
+        apply_volume_dithered(buf, n * 2);
+
+        frames_done += n;
+
+        // Only dump after warmup, and only dump_frames samples
+        if (frames_done > warmup_frames && dumped < dump_frames) {
+            for (int i = 0; i < n * 2 && dumped < dump_frames; i += 2) {
+                printf("PCM:%04X%04X\n", (uint16_t)buf[i], (uint16_t)buf[i + 1]);
+                dumped++;
+            }
+            fflush(stdout);
+        }
+    }
+
+    printf("PCM:END\n");
+    ESP_LOGI(TAG, "Test dump complete");
 }

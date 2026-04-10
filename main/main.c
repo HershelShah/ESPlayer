@@ -451,6 +451,9 @@ void app_main(void)
     audio_pipeline_init();
     hearing_cal_init();
 
+    // --- Run DSP test dump on boot (captured by Python measurement script) ---
+    audio_pipeline_test_dump();
+
     // Try loading saved hearing profile
     // Try loading saved hearing profile from SD card
     if (audio_eq_load_profile_file("hearing.txt") == ESP_OK) {

@@ -47,3 +47,11 @@ uint8_t audio_pipeline_get_volume(void);
 
 // Get underrun stats: how many times the BT callback got insufficient data.
 void audio_pipeline_get_stats(uint32_t *underruns, uint32_t *total);
+
+// Start dumping processed PCM to serial (10 seconds).
+// Output format: "PCM:LLLLRRRR\n" (hex int16 L+R per line), ends with "PCM:END\n".
+void audio_pipeline_start_pcm_dump(void);
+
+// Generate a test tone, process through DSP chain, dump to serial.
+// No BT/SD/music needed — for measurement only.
+void audio_pipeline_test_dump(void);
