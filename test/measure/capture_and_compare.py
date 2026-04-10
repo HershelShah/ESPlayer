@@ -40,48 +40,62 @@ CAPTURE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def capture_serial(filename: str) -> str:
-    """Capture processed PCM from ESP32 serial port. No BT needed."""
+    """Capture processed PCM from ESP32 serial port. No BT needed.
+    If filename is 'all', captures all labeled dumps from boot."""
     import serial as pyserial
+    import struct
 
-    path = os.path.join(CAPTURE_DIR, filename)
-    print(f"Capturing PCM from serial {SERIAL_PORT} → {path}")
-    print(f"  Resetting ESP32 (test dump runs at boot)...")
+    is_multi = (filename == "all")
+    print(f"Capturing PCM from serial {SERIAL_PORT}")
+    print(f"  Resetting ESP32 (test dumps run at boot)...")
 
     s = pyserial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=2)
-
-    # Reset ESP32 via DTR/RTS toggle — test dump runs automatically on boot
     s.dtr = False
     s.rts = True
     time.sleep(0.1)
     s.rts = False
     time.sleep(0.5)
-    s.read(s.in_waiting or 1)  # Flush boot garbage
+    s.read(s.in_waiting or 1)
 
-    # Collect PCM hex lines
-    samples_l = []
-    samples_r = []
-    timeout_at = time.time() + 30  # 30s — boot + 2s dump + margin
-    started = False
+    # Collect multiple labeled dumps
+    captures = {}  # label -> (samples_l, samples_r)
+    current_label = filename.replace(".wav", "") if not is_multi else None
+    samples_l, samples_r = [], []
+    timeout_at = time.time() + 60  # 60s for multiple dumps
 
     while time.time() < timeout_at:
         line = s.readline()
         if not line:
-            if started:
-                break  # No data for 1s after starting = done
+            if samples_l:
+                timeout_at = time.time() + 3  # Short timeout after data starts
             continue
 
         text = line.decode('utf-8', errors='replace').strip()
-        if text == "PCM:END":
-            print(f"  Received END marker")
-            break
-        if text.startswith("PCM:") and len(text) == 12:  # "PCM:" + 8 hex chars
-            if not started:
-                started = True
-                print(f"  Receiving samples...")
+
+        if text.startswith("LABEL:"):
+            # Save previous capture if any
+            if current_label and samples_l:
+                captures[current_label] = (list(samples_l), list(samples_r))
+                print(f"  {current_label}: {len(samples_l)} frames")
+            current_label = text[6:]
+            samples_l, samples_r = [], []
+            print(f"  Capturing '{current_label}'...")
+
+        elif text == "PCM:END":
+            if current_label and samples_l:
+                captures[current_label] = (list(samples_l), list(samples_r))
+                print(f"  {current_label}: {len(samples_l)} frames")
+            if not is_multi:
+                break
+            samples_l, samples_r = [], []
+
+        elif text == "PCM:START":
+            samples_l, samples_r = [], []
+
+        elif text.startswith("PCM:") and len(text) == 12:
             hex_data = text[4:]
             l_val = int(hex_data[0:4], 16)
             r_val = int(hex_data[4:8], 16)
-            # Convert from uint16 to int16
             if l_val > 32767: l_val -= 65536
             if r_val > 32767: r_val -= 65536
             samples_l.append(l_val)
@@ -89,24 +103,29 @@ def capture_serial(filename: str) -> str:
 
     s.close()
 
-    if len(samples_l) == 0:
+    # Save last capture
+    if current_label and samples_l and current_label not in captures:
+        captures[current_label] = (samples_l, samples_r)
+        print(f"  {current_label}: {len(samples_l)} frames")
+
+    if not captures:
         print(f"  ERROR: No PCM data received")
-        print(f"  Make sure ESP32 is playing music and try again")
         sys.exit(1)
 
-    # Write WAV
-    import struct
-    f = wave.open(path, 'w')
-    f.setnchannels(2)
-    f.setsampwidth(2)
-    f.setframerate(44100)
-    for l, r in zip(samples_l, samples_r):
-        f.writeframes(struct.pack('<hh', l, r))
-    f.close()
+    # Write WAV files
+    paths = []
+    for label, (sl, sr) in captures.items():
+        path = os.path.join(CAPTURE_DIR, f"capture_{label}.wav")
+        f = wave.open(path, 'w')
+        f.setnchannels(2)
+        f.setsampwidth(2)
+        f.setframerate(44100)
+        for l, r in zip(sl, sr):
+            f.writeframes(struct.pack('<hh', l, r))
+        f.close()
+        paths.append(path)
 
-    duration = len(samples_l) / 44100
-    print(f"  Captured: {len(samples_l)} frames ({duration:.1f}s)")
-    return path
+    return paths[0] if len(paths) == 1 else paths
 
 
 def capture(filename: str, duration: int = 10) -> str:
@@ -360,22 +379,37 @@ def main():
         r_b = analyze(args.b, label_b := os.path.basename(args.b))
         compare(r_a, r_b, label_a, label_b)
 
+    elif args.serial and not args.label:
+        # Multi-capture mode: capture all labeled dumps from boot, analyze + compare
+        result = capture_serial("all")
+        if isinstance(result, list):
+            results = {}
+            for p in result:
+                label = os.path.basename(p).replace("capture_", "").replace(".wav", "")
+                results[label] = analyze(p, label)
+            # Compare all pairs against first
+            labels = list(results.keys())
+            if len(labels) >= 2:
+                for i in range(1, len(labels)):
+                    compare(results[labels[0]], results[labels[i]], labels[0], labels[i])
+        else:
+            analyze(result, "capture")
+
     elif args.label:
         filename = f"capture_{args.label}.wav"
         if args.serial:
             path = capture_serial(filename)
         else:
             path = capture(filename, args.duration)
+        if isinstance(path, list):
+            path = path[0]
         analyze(path, args.label)
         print(f"\nSaved as {filename}")
         print(f"Compare: uv run python {__file__} --a capture_X.wav --b capture_Y.wav")
 
     elif not args.no_capture:
         filename = "capture_latest.wav"
-        if args.serial:
-            path = capture_serial(filename)
-        else:
-            path = capture(filename, args.duration)
+        path = capture(filename, args.duration)
         analyze(path, "latest capture")
 
     else:

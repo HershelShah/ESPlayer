@@ -451,8 +451,26 @@ void app_main(void)
     audio_pipeline_init();
     hearing_cal_init();
 
-    // --- Run DSP test dump on boot (captured by Python measurement script) ---
+    // --- Run DSP test dumps on boot (captured by Python measurement script) ---
+    // Flat
+    audio_eq_preset_flat();
+    audio_eq_load_profile(audio_eq_get_profile());
+    printf("LABEL:flat\n");
     audio_pipeline_test_dump();
+
+    // EDM
+    audio_eq_preset_edm();
+    printf("LABEL:edm\n");
+    audio_pipeline_test_dump();
+
+    // Harman OE
+    audio_eq_preset_harman_oe();
+    printf("LABEL:harman_oe\n");
+    audio_pipeline_test_dump();
+
+    // Back to flat for normal operation
+    audio_eq_preset_flat();
+    audio_eq_load_profile(audio_eq_get_profile());
 
     // Try loading saved hearing profile
     // Try loading saved hearing profile from SD card
