@@ -29,3 +29,9 @@ bool audio_dsp_get_exciter(void);
 void audio_dsp_crossfeed(int16_t *samples, int frame_count);
 void audio_dsp_set_crossfeed(bool enabled);
 bool audio_dsp_get_crossfeed(void);
+
+// --- 2x Oversampled Limiter + Exciter ---
+// Runs limiter and exciter at 2x sample rate to reduce aliasing from
+// nonlinear processing. Upsample → process → downsample internally.
+// Replaces individual limiter + exciter calls.
+void audio_dsp_limiter_exciter_oversampled(int16_t *samples, int frame_count);
