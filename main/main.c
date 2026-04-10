@@ -285,72 +285,82 @@ static void draw_calibrate(void)
         ui_display_fill_rect(60, 150, 200, 45, COLOR_GREEN);
         ui_display_string(100, 166, "START TEST", COLOR_BLACK, COLOR_GREEN);
 
-    } else if (cal->state == CAL_STATE_PLAYING || cal->state == CAL_STATE_PAUSE) {
-        // Progress
-        char prog[32];
-        snprintf(prog, sizeof(prog), "Frequency %d / %d",
+    } else if (cal->state == CAL_STATE_PLAYING || cal->state == CAL_STATE_PAUSE ||
+               cal->state == CAL_STATE_WAITING) {
+        // Ear + progress
+        char prog[40];
+        snprintf(prog, sizeof(prog), "%s ear - Freq %d / %d",
+                 cal->current_ear == CAL_EAR_LEFT ? "LEFT" : "RIGHT",
                  cal->current_freq_idx + 1, CAL_NUM_FREQS);
-        ui_display_string(80, 40, prog, COLOR_WHITE, COLOR_BLACK);
+        ui_display_string(30, 35, prog, COLOR_WHITE, COLOR_BLACK);
 
         // Current frequency
         char freq[16];
         if (CAL_TEST_FREQS[cal->current_freq_idx] >= 1000)
-            snprintf(freq, sizeof(freq), "%.0f kHz",
+            snprintf(freq, sizeof(freq), "%.0fkHz",
                      CAL_TEST_FREQS[cal->current_freq_idx] / 1000);
         else
-            snprintf(freq, sizeof(freq), "%.0f Hz",
+            snprintf(freq, sizeof(freq), "%.0fHz",
                      CAL_TEST_FREQS[cal->current_freq_idx]);
+        ui_display_string(120, 55, freq, COLOR_CYAN, COLOR_BLACK);
 
-        // Big frequency display
-        int fw = (int)strlen(freq) * 16;
-        // Use 2x text for frequency
-        ui_display_string((DISPLAY_WIDTH - fw) / 2 + 30, 75, freq, COLOR_CYAN, COLOR_BLACK);
+        // Level + reversals
+        char level[32];
+        snprintf(level, sizeof(level), "Level: %.0f dB  Rev: %d/6",
+                 cal->current_volume_db, cal->reversals);
+        ui_display_string(30, 75, level, COLOR_WHITE, COLOR_BLACK);
 
-        // Volume ramp bar
-        ui_display_fill_rect(30, 110, 260, 20, RGB565(40, 40, 40));
-        float vol_pct = (cal->current_volume - 0.002f) / (0.5f - 0.002f);
-        if (vol_pct < 0) vol_pct = 0;
-        if (vol_pct > 1) vol_pct = 1;
-        int bar_w = (int)(vol_pct * 256);
-        uint16_t bar_col = (vol_pct < 0.5f) ? COLOR_GREEN :
-                           (vol_pct < 0.8f) ? COLOR_YELLOW : COLOR_RED;
-        ui_display_fill_rect(32, 112, bar_w, 16, bar_col);
+        // Status
+        if (cal->state == CAL_STATE_PLAYING) {
+            ui_display_string(60, 100, "Listen carefully...", COLOR_YELLOW, COLOR_BLACK);
+        } else {
+            ui_display_string(80, 100, "(pause)", RGB565(120, 120, 120), COLOR_BLACK);
+        }
 
-        ui_display_string(100, 135, "Volume ramping up...", COLOR_WHITE, COLOR_BLACK);
+        // "I hear it" button
+        ui_display_fill_rect(30, 125, 260, 55, COLOR_GREEN);
+        ui_display_string(100, 145, "I HEAR IT!", COLOR_BLACK, COLOR_GREEN);
 
-        // "I hear it" button — big target for easy tapping
-        ui_display_fill_rect(30, 160, 260, 60, COLOR_GREEN);
-        ui_display_string(100, 183, "I HEAR IT!", COLOR_BLACK, COLOR_GREEN);
-
-        // Done frequencies shown as dots
+        // Progress dots
         for (int i = 0; i < CAL_NUM_FREQS; i++) {
-            int dx = 40 + i * 32;
+            int dx = 30 + i * 38;
             uint16_t c = cal->freq_done[i] ? COLOR_GREEN :
                         (i == cal->current_freq_idx) ? COLOR_YELLOW : RGB565(60,60,60);
-            ui_display_fill_rect(dx, 230, 16, 8, c);
+            ui_display_fill_rect(dx, 195, 24, 8, c);
         }
+
+        // Ear indicator
+        ui_display_fill_rect(30, 210, 120, 20, cal->current_ear == CAL_EAR_LEFT ? COLOR_CYAN : RGB565(40,40,40));
+        ui_display_string(60, 214, "LEFT", COLOR_WHITE, cal->current_ear == CAL_EAR_LEFT ? COLOR_CYAN : RGB565(40,40,40));
+        ui_display_fill_rect(170, 210, 120, 20, cal->current_ear == CAL_EAR_RIGHT ? COLOR_CYAN : RGB565(40,40,40));
+        ui_display_string(196, 214, "RIGHT", COLOR_WHITE, cal->current_ear == CAL_EAR_RIGHT ? COLOR_CYAN : RGB565(40,40,40));
 
     } else if (cal->state == CAL_STATE_DONE) {
-        ui_display_string(40, 45, "Calibration Complete!", COLOR_GREEN, COLOR_BLACK);
+        ui_display_string(40, 35, "Calibration Complete!", COLOR_GREEN, COLOR_BLACK);
 
-        // Show results
+        // Show L/R results side by side
+        ui_display_string(20, 55, "Freq", COLOR_WHITE, COLOR_BLACK);
+        ui_display_string(120, 55, "Left", COLOR_CYAN, COLOR_BLACK);
+        ui_display_string(210, 55, "Right", COLOR_CYAN, COLOR_BLACK);
+
         for (int i = 0; i < CAL_NUM_FREQS; i++) {
-            char line[40];
-            const char *unit = (CAL_TEST_FREQS[i] >= 1000) ? "kHz" : "Hz";
-            float fval = (CAL_TEST_FREQS[i] >= 1000) ?
-                          CAL_TEST_FREQS[i] / 1000 : CAL_TEST_FREQS[i];
-            snprintf(line, sizeof(line), "%.0f%s: %+.1f dB",
-                     fval, unit, cal->thresholds[i]);
-            uint16_t col = (cal->thresholds[i] > 20) ? COLOR_RED :
-                          (cal->thresholds[i] > 10) ? COLOR_YELLOW : COLOR_GREEN;
-            ui_display_string(20, 70 + i * 16, line, col, COLOR_BLACK);
+            int y = 70 + i * 14;
+            char lbl[10], lv[10], rv[10];
+            float fval = CAL_TEST_FREQS[i] >= 1000 ? CAL_TEST_FREQS[i]/1000 : CAL_TEST_FREQS[i];
+            const char *unit = CAL_TEST_FREQS[i] >= 1000 ? "k" : "";
+            snprintf(lbl, sizeof(lbl), "%.0f%s", fval, unit);
+            snprintf(lv, sizeof(lv), "%+.0f", cal->thresholds_l[i]);
+            snprintf(rv, sizeof(rv), "%+.0f", cal->thresholds_r[i]);
+            ui_display_string(20, y, lbl, COLOR_WHITE, COLOR_BLACK);
+            uint16_t lc = (cal->thresholds_l[i] > 20) ? COLOR_RED : (cal->thresholds_l[i] > 10) ? COLOR_YELLOW : COLOR_GREEN;
+            uint16_t rc = (cal->thresholds_r[i] > 20) ? COLOR_RED : (cal->thresholds_r[i] > 10) ? COLOR_YELLOW : COLOR_GREEN;
+            ui_display_string(120, y, lv, lc, COLOR_BLACK);
+            ui_display_string(210, y, rv, rc, COLOR_BLACK);
         }
 
-        // Apply button
         ui_display_fill_rect(30, 175, 120, 40, COLOR_GREEN);
         ui_display_string(44, 189, "APPLY & SAVE", COLOR_BLACK, COLOR_GREEN);
 
-        // Redo button
         ui_display_fill_rect(170, 175, 120, 40, COLOR_BLUE);
         ui_display_string(200, 189, "REDO", COLOR_WHITE, COLOR_BLUE);
     }
@@ -612,7 +622,8 @@ void app_main(void)
                     // START button
                     hearing_cal_start();
                     s_screen_dirty = true;
-                } else if (cal->state == CAL_STATE_PLAYING && pt.y >= 155 && pt.y < 225) {
+                } else if ((cal->state == CAL_STATE_PLAYING || cal->state == CAL_STATE_WAITING)
+                           && pt.y >= 120 && pt.y < 185) {
                     // "I HEAR IT" button
                     hearing_cal_confirm();
                     s_screen_dirty = true;

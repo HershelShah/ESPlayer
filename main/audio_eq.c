@@ -425,44 +425,38 @@ void audio_eq_build_hearing_profile(const float *test_freqs, const float *thresh
     memset(out, 0, sizeof(eq_profile_t));
     strncpy(out->name, "Hearing", sizeof(out->name));
 
-    // Reference: "normal" hearing threshold at each frequency.
-    // Based on ISO 226 equal-loudness contour at threshold of hearing.
-    // Approximate values in dB SPL for young adult with normal hearing.
+    // Reference: ISO 226 threshold of hearing at each test frequency (dB SPL).
+    // 7 frequencies: 250, 500, 1k, 2k, 4k, 6k, 8k Hz (12kHz dropped).
     static const float ref_thresholds[] = {
-        // 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 6kHz, 8kHz, 12kHz
-        10.0f, 4.0f, 2.0f, -1.0f, -4.0f, 2.0f, 10.0f, 30.0f
+        10.0f, 4.0f, 2.0f, -1.0f, -4.0f, 2.0f, 10.0f
     };
 
-    // For each test frequency, compute how much the user deviates from reference.
-    // If user needs more volume than reference → they're less sensitive → boost.
     out->band_count = (n > EQ_MAX_BANDS) ? EQ_MAX_BANDS : n;
+    if (out->band_count > 7) out->band_count = 7;
 
-    // Find the user's best (lowest) threshold to use as anchor
+    // Find anchor: user's best frequency (lowest threshold relative to reference)
     float best_threshold = thresholds[0];
     float best_ref = ref_thresholds[0];
-    for (int i = 1; i < n && i < 8; i++) {
-        if (thresholds[i] - (i < 8 ? ref_thresholds[i] : ref_thresholds[7]) <
-            best_threshold - best_ref) {
+    for (int i = 1; i < out->band_count; i++) {
+        if (thresholds[i] - ref_thresholds[i] < best_threshold - best_ref) {
             best_threshold = thresholds[i];
-            best_ref = (i < 8) ? ref_thresholds[i] : ref_thresholds[7];
+            best_ref = ref_thresholds[i];
         }
     }
     float anchor = best_threshold - best_ref;
 
     for (int i = 0; i < out->band_count; i++) {
-        float ref = (i < 8) ? ref_thresholds[i] : ref_thresholds[7];
-        // Deviation: how much worse is the user vs reference (anchored)
-        float deviation = (thresholds[i] - ref) - anchor;
+        float deviation = (thresholds[i] - ref_thresholds[i]) - anchor;
 
-        // Apply only 55% of correction (matching Sonarworks/AutoEQ best practice)
+        // 55% partial correction (half-gain rule, matches Sonarworks/NAL-NL2)
         float gain = deviation * 0.55f;
         if (gain < -12.0f) gain = -12.0f;
         if (gain >  12.0f) gain =  12.0f;
 
-        // Frequency-dependent Q: wider for widely-spaced bands, narrower for close ones
-        // 250→500: 1 octave (Q=0.6), 500→1k: 1 octave (Q=0.7), 1k→2k: 1 octave (Q=0.8)
-        // 2k→4k: 1 octave (Q=0.9), 4k→6k: 0.6 oct (Q=1.1), 6k→8k: 0.4 oct (Q=1.1), 8k→12k: 0.6 oct (Q=0.8)
-        static const float q_map[] = { 0.6f, 0.7f, 0.8f, 0.9f, 1.1f, 1.1f, 0.8f, 0.6f };
+        // Q values: wider for widely-spaced bands, narrower for close ones
+        // 250→500: 1 oct, 500→1k: 1 oct, 1k→2k: 1 oct, 2k→4k: 1 oct,
+        // 4k→6k: 0.6 oct, 6k→8k: 0.4 oct
+        static const float q_map[] = { 0.6f, 0.7f, 0.8f, 0.9f, 1.1f, 1.1f, 0.8f };
         float q = (i < 8) ? q_map[i] : 0.7f;
 
         out->bands[i].freq    = test_freqs[i];
@@ -472,6 +466,6 @@ void audio_eq_build_hearing_profile(const float *test_freqs, const float *thresh
         out->bands[i].enabled = (fabsf(gain) > 0.5f);  // Skip negligible corrections
 
         ESP_LOGI(TAG, "Hearing band %d: %.0f Hz, threshold=%.1f dB, ref=%.1f, correction=%+.1f dB",
-                 i, test_freqs[i], thresholds[i], ref, gain);
+                 i, test_freqs[i], thresholds[i], ref_thresholds[i], gain);
     }
 }

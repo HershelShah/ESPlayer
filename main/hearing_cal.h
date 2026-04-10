@@ -4,44 +4,53 @@
 #include <stdbool.h>
 #include "audio_eq.h"
 
-// Test frequencies for hearing calibration
-#define CAL_NUM_FREQS  8
+// Test frequencies — 7 points from 250Hz to 8kHz.
+// 12kHz dropped: SBC codec rolls off 6-15dB above 10kHz, corrupting measurements.
+#define CAL_NUM_FREQS  7
 extern const float CAL_TEST_FREQS[CAL_NUM_FREQS];
 
 typedef enum {
-    CAL_STATE_IDLE,       // Not running
-    CAL_STATE_PLAYING,    // Playing a tone, waiting for user tap
-    CAL_STATE_PAUSE,      // Brief pause between tones
-    CAL_STATE_DONE,       // All frequencies tested
+    CAL_STATE_IDLE,
+    CAL_STATE_PLAYING,    // Playing a tone, waiting for response
+    CAL_STATE_PAUSE,      // Brief silence between tones
+    CAL_STATE_WAITING,    // Tone off, waiting to see if user taps (catch trial / descend)
+    CAL_STATE_DONE,
 } cal_state_t;
+
+typedef enum {
+    CAL_EAR_LEFT,
+    CAL_EAR_RIGHT,
+} cal_ear_t;
 
 typedef struct {
     cal_state_t state;
-    int         current_freq_idx;          // Which frequency we're testing (0..5)
-    float       current_volume;            // Current tone volume (0.0 to 1.0)
-    float       thresholds[CAL_NUM_FREQS]; // Recorded thresholds (relative dB)
-    bool        freq_done[CAL_NUM_FREQS];  // Which frequencies are done
+    cal_ear_t   current_ear;               // Which ear we're testing
+    int         current_freq_idx;          // Which frequency (0..6)
+    float       current_volume_db;         // Current tone level in dB relative to start
+    float       thresholds_l[CAL_NUM_FREQS]; // Left ear thresholds (dB)
+    float       thresholds_r[CAL_NUM_FREQS]; // Right ear thresholds (dB)
+    bool        freq_done[CAL_NUM_FREQS];
+
+    // Adaptive staircase state
+    int         reversals;                 // Count of direction changes
+    int         last_direction;            // +1 = ascending, -1 = descending
+    float       reversal_levels[8];        // dB levels at each reversal
+    int         step_db;                   // Current step size (6 or 3 dB)
+    bool        user_responded;            // Did user tap during current presentation?
 } cal_status_t;
 
-// Initialise calibration system.
 void hearing_cal_init(void);
-
-// Start a new calibration session. Resets all thresholds.
 void hearing_cal_start(void);
 
-// Called by UI when user taps "I hear it". Records threshold for current frequency.
+// User tapped "I hear it"
 void hearing_cal_confirm(void);
 
-// Called every ~50ms to advance the tone ramp. Returns PCM data if calibration
-// is active, otherwise returns false and the normal audio pipeline runs.
-// Writes stereo 16-bit interleaved PCM into buf (frame_count frames).
+// User tapped "I don't hear it" / tone timed out
+void hearing_cal_no_response(void);
+
+// Generate audio. Returns true if calibration is active.
 bool hearing_cal_generate(int16_t *buf, int frame_count, int sample_rate);
 
-// Get current calibration status (for UI).
 const cal_status_t *hearing_cal_get_status(void);
-
-// After calibration completes, build and apply the correction EQ profile.
 void hearing_cal_apply(void);
-
-// Save calibration results to SD card.
 void hearing_cal_save(void);
