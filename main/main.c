@@ -17,7 +17,6 @@
 #include "audio_eq.h"
 #include "audio_dsp.h"
 #include "hearing_cal.h"
-#include "dsp_test.h"
 
 static const char *TAG = "main";
 

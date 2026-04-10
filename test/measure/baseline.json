@@ -3,28 +3,31 @@
     "thd_n_db": -93.08677173933529,
     "thd_n_percent": 0.0022164677316978067,
     "sinad_db": 93.08677173933529,
-    "enob": 15.17056008959058
+    "enob": 15.17056008959058,
+    "inband_noise_db": -117.40306623703249
   },
   "thd_n_tpdf": {
-    "thd_n_db": -87.61195190477578,
-    "thd_n_percent": 0.004162961598812539,
-    "sinad_db": 87.61195190477578,
-    "enob": 14.261121578866408
+    "thd_n_db": -87.49106586886839,
+    "thd_n_percent": 0.004221304751072536,
+    "sinad_db": 87.49106586886839,
+    "enob": 14.241040842004717,
+    "inband_noise_db": -107.95391780122935
   },
   "thd_n_noise_shaped": {
-    "thd_n_db": -46.48269406933917,
-    "thd_n_percent": 0.4740949142375794,
-    "sinad_db": 46.48269406933917,
-    "enob": 7.429018948395211
+    "thd_n_db": -87.10901192769599,
+    "thd_n_percent": 0.004411125394777995,
+    "sinad_db": 87.10901192769599,
+    "enob": 14.177576732175414,
+    "inband_noise_db": -108.17261640778165
   },
   "dynamic_range_truncate": {
     "effective_dynamic_range_db": 88.50050170352439
   },
   "dynamic_range_tpdf": {
-    "effective_dynamic_range_db": 81.00045918627656
+    "effective_dynamic_range_db": 82.50046768972612
   },
   "dynamic_range_noise_shaped": {
-    "effective_dynamic_range_db": 30.00017006899132
+    "effective_dynamic_range_db": 81.00045918627656
   },
   "idle_tones_truncate": {
     "spectral_flatness": 2.051334752635861e-05,
@@ -33,15 +36,15 @@
     "has_idle_tones": true
   },
   "idle_tones_tpdf": {
-    "spectral_flatness": 0.06342811732016916,
-    "noise_floor_db": -49.52901372528257,
+    "spectral_flatness": 0.06293406564490171,
+    "noise_floor_db": -49.59686933415408,
     "spurious_peaks": 7,
     "has_idle_tones": true
   },
   "idle_tones_noise_shaped": {
-    "spectral_flatness": 0.014326939907193356,
-    "noise_floor_db": -57.05728084216241,
-    "spurious_peaks": 554,
+    "spectral_flatness": 0.06774836209620219,
+    "noise_floor_db": -49.22125920984769,
+    "spurious_peaks": 7,
     "has_idle_tones": true
   },
   "aliasing_softclip_7k": {

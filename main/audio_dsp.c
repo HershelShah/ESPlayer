@@ -160,36 +160,58 @@ void audio_dsp_loudness(int16_t *samples, int frame_count, uint8_t volume)
 }
 
 // ===========================================================================
-// 4. Crossfeed / BS2B
+// 4. Crossfeed (Bauer-inspired, simplified BS2B)
 // ===========================================================================
 //
-// 1-pole lowpass at 700Hz, cross-mix at -4.5dB (0.596 linear).
+// Proper crossfeed simulates acoustic crosstalk in a room:
+// 1. Lowpass the opposite channel (head shadow = HF attenuation)
+// 2. Delay the crossfed signal (interaural time difference, ~7 samples @ 44.1kHz ≈ 160µs)
+// 3. Attenuate the direct channel's bass (both ears hear LF equally in a room)
+// 4. Mix at -4.5dB (BS2B default level)
 
-static float s_xf_state_l = 0.0f;  // LP state for L→R
-static float s_xf_state_r = 0.0f;  // LP state for R→L
+#define XF_DELAY 7  // ~160µs ITD at 44.1kHz
+static float s_xf_lp_l = 0.0f;   // LP state for L→R crossfeed
+static float s_xf_lp_r = 0.0f;   // LP state for R→L crossfeed
+static float s_xf_dl_l[XF_DELAY]; // Delay line L→R
+static float s_xf_dl_r[XF_DELAY]; // Delay line R→L
+static int   s_xf_dl_idx = 0;     // Circular buffer index
+static float s_xf_bass_l = 0.0f;  // Direct channel bass LP state
+static float s_xf_bass_r = 0.0f;
 
 void audio_dsp_crossfeed(int16_t *samples, int frame_count)
 {
     if (!s_crossfeed_on) return;
 
-    // 1-pole LP coefficient at 700Hz for 44100Hz: alpha = 2*pi*700/44100 / (1 + 2*pi*700/44100)
-    const float alpha = 0.0906f;  // ~700Hz @ 44100Hz
-    const float level = 0.75f;    // -2.5dB — stronger for testing
-
-    float sl = s_xf_state_l;
-    float sr = s_xf_state_r;
+    const float lp_alpha = 0.0906f;   // 1-pole LP at ~700Hz (head shadow)
+    const float xf_level = 0.596f;    // -4.5dB crossfeed level (BS2B default)
+    const float bass_alpha = 0.028f;   // 1-pole LP at ~200Hz for bass attenuation
+    const float bass_atten = 0.3f;     // Reduce direct bass by 30% (simulates equal-ear LF)
 
     for (int i = 0; i < frame_count * 2; i += 2) {
         float l = (float)samples[i];
         float r = (float)samples[i + 1];
 
-        // Lowpass the opposite channel
-        sl = sl + alpha * (r - sl);
-        sr = sr + alpha * (l - sr);
+        // 1. Lowpass the opposite channel (head shadow filter)
+        s_xf_lp_l = s_xf_lp_l + lp_alpha * (r - s_xf_lp_l);
+        s_xf_lp_r = s_xf_lp_r + lp_alpha * (l - s_xf_lp_r);
 
-        // Mix
-        float out_l = l + sl * level;
-        float out_r = r + sr * level;
+        // 2. Delay the crossfed signal (ITD)
+        int idx = s_xf_dl_idx;
+        float delayed_l = s_xf_dl_l[idx];  // Read old value
+        float delayed_r = s_xf_dl_r[idx];
+        s_xf_dl_l[idx] = s_xf_lp_l;        // Write new value
+        s_xf_dl_r[idx] = s_xf_lp_r;
+        s_xf_dl_idx = (idx + 1) % XF_DELAY;
+
+        // 3. Attenuate direct channel bass (both ears hear LF equally in rooms)
+        s_xf_bass_l = s_xf_bass_l + bass_alpha * (l - s_xf_bass_l);
+        s_xf_bass_r = s_xf_bass_r + bass_alpha * (r - s_xf_bass_r);
+        float l_direct = l - s_xf_bass_l * bass_atten;
+        float r_direct = r - s_xf_bass_r * bass_atten;
+
+        // 4. Mix: attenuated direct + delayed crossfed opposite
+        float out_l = l_direct + delayed_l * xf_level;
+        float out_r = r_direct + delayed_r * xf_level;
 
         if (out_l > 32767.0f)  out_l = 32767.0f;
         if (out_l < -32768.0f) out_l = -32768.0f;
@@ -199,9 +221,6 @@ void audio_dsp_crossfeed(int16_t *samples, int frame_count)
         samples[i]     = (int16_t)out_l;
         samples[i + 1] = (int16_t)out_r;
     }
-
-    s_xf_state_l = sl;
-    s_xf_state_r = sr;
 }
 
 void audio_dsp_set_crossfeed(bool enabled)  { s_crossfeed_on = enabled; }
@@ -219,6 +238,9 @@ void audio_dsp_init(int sample_rate)
     s_loud_lo.b0 = 1.0f;
     s_loud_hi.b0 = 1.0f;
     s_loud_last_vol = 255;
-    s_xf_state_l = 0.0f;
-    s_xf_state_r = 0.0f;
+    s_xf_lp_l = s_xf_lp_r = 0.0f;
+    s_xf_bass_l = s_xf_bass_r = 0.0f;
+    s_xf_dl_idx = 0;
+    memset(s_xf_dl_l, 0, sizeof(s_xf_dl_l));
+    memset(s_xf_dl_r, 0, sizeof(s_xf_dl_r));
 }
