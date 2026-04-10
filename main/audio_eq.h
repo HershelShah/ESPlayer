@@ -49,12 +49,18 @@ void audio_eq_process(int16_t *samples, int frame_count);
 // Save current profile to SD card: /sdcard/eq_profiles/<name>.txt
 esp_err_t audio_eq_save_profile(const char *filename);
 
-// Load profile from SD card.
+// Load profile from SD card (native format).
 esp_err_t audio_eq_load_profile_file(const char *filename);
+
+// Load AutoEQ ParametricEQ.txt format (full path).
+// Supports 6000+ headphone profiles from github.com/jaakkopasanen/AutoEq
+esp_err_t audio_eq_load_autoeq(const char *filepath);
 
 // --- Built-in presets ---
 void audio_eq_preset_flat(void);
 void audio_eq_preset_edm(void);
+void audio_eq_preset_harman_oe(void);
+void audio_eq_preset_harman_ie(void);
 
 // Build a correction profile from hearing calibration thresholds.
 // thresholds[]: dB SPL at which user hears each test frequency.

@@ -117,32 +117,41 @@ static void loud_apply_biquad(loud_biquad_t *bq, int16_t *samples, int frame_cou
     }
 }
 
+// ISO 226:2003 compensation at key frequencies.
+// Difference in SPL between 80 phon (reference) and 40 phon (quiet listening).
+// Positive = needs boost at quiet levels. Normalized to 0 at 1kHz.
+// ISO 226:2003 compensation at key frequencies (40 phon vs 80 phon).
+// Positive = needs boost at quiet levels. Normalized to 0 at 1kHz.
+static const float ISO226_COMP_40[]    = { 28.7, 13.4, 0.0, -3.3, 11.8 };
+// Frequencies: 63, 200, 1000, 4000, 8000 Hz
+// These represent: at 40 phon, you need +28.7dB more at 63Hz vs 1kHz to hear equally loud.
+
 void audio_dsp_loudness(int16_t *samples, int frame_count, uint8_t volume)
 {
-    // Only recompute coefficients when volume changes (saves CPU)
     if (volume != s_loud_last_vol) {
         s_loud_last_vol = volume;
 
-        // Map volume 0-255 to estimated listening level.
-        // At vol=255: ~85dB SPL (reference, no compensation needed).
-        // At vol=128: ~65dB SPL (moderate compensation).
-        // At vol=64:  ~50dB SPL (strong compensation).
+        // Map volume 0-255 to estimated phon level (40-80 phon range)
+        // vol=255 → 80 phon (reference, no compensation)
+        // vol=64  → 40 phon (full compensation)
         float vol_ratio = (float)volume / 255.0f;
         if (vol_ratio < 0.05f) vol_ratio = 0.05f;
 
-        // Compensation amount: more boost at lower volumes
-        // At 85dB (vol=255): 0dB boost. At 50dB (vol~64): +8dB bass, +4dB treble.
-        float compensation = (1.0f - vol_ratio) * 1.2f;  // 0 to ~1.2 scaling
-        float bass_boost   = compensation * 8.0f;   // Up to +8 dB
-        float treble_boost = compensation * 4.0f;    // Up to +4 dB
+        // Interpolation factor: 0 = 80 phon (no comp), 1 = 40 phon (full comp)
+        float t = 1.0f - vol_ratio;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
 
-        // Recompute shelf filters
+        // Compute ISO 226-derived bass and treble compensation
+        // Low shelf at 80Hz: ISO 226 says +28.7dB at 63Hz for 40 phon
+        float bass_boost = t * ISO226_COMP_40[0] * 0.4f;  // Scale down — full 28dB is too much
+        float treble_boost = t * ISO226_COMP_40[4] * 0.3f;
+
         float fs = (float)s_sr;
-        loud_compute_low_shelf(&s_loud_lo, fs, 100.0f, bass_boost, 0.7f);
+        loud_compute_low_shelf(&s_loud_lo, fs, 80.0f, bass_boost, 0.7f);
         loud_compute_high_shelf(&s_loud_hi, fs, 8000.0f, treble_boost, 0.7f);
     }
 
-    // Skip if volume is high (no compensation needed)
     float vol_ratio = (float)volume / 255.0f;
     if (vol_ratio > 0.9f) return;
 

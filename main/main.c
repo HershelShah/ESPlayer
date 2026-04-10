@@ -38,17 +38,19 @@ typedef enum {
 static screen_t s_screen = SCREEN_BT_CONNECT;
 static bool     s_screen_dirty = true;  // Redraw needed
 
-// EQ profile cycling: Flat → EDM → Hearing → Flat → ...
+// EQ profile cycling: Flat → EDM → Harman OE → Harman IE → Hearing → Flat → ...
 typedef enum {
     PROFILE_FLAT,
     PROFILE_EDM,
+    PROFILE_HARMAN_OE,
+    PROFILE_HARMAN_IE,
     PROFILE_HEARING,
     PROFILE_COUNT,
 } profile_slot_t;
 
 static profile_slot_t s_active_profile = PROFILE_FLAT;
-static eq_profile_t   s_hearing_profile;    // Cached hearing profile
-static bool           s_has_hearing = false; // Has a hearing profile been created?
+static eq_profile_t   s_hearing_profile;
+static bool           s_has_hearing = false;
 
 static void apply_profile(profile_slot_t slot)
 {
@@ -60,6 +62,12 @@ static void apply_profile(profile_slot_t slot)
         break;
     case PROFILE_EDM:
         audio_eq_preset_edm();
+        break;
+    case PROFILE_HARMAN_OE:
+        audio_eq_preset_harman_oe();
+        break;
+    case PROFILE_HARMAN_IE:
+        audio_eq_preset_harman_ie();
         break;
     case PROFILE_HEARING:
         if (s_has_hearing) {
@@ -84,10 +92,12 @@ static void cycle_profile(void)
 static const char *profile_name(void)
 {
     switch (s_active_profile) {
-    case PROFILE_FLAT:    return "FLAT";
-    case PROFILE_EDM:     return "EDM";
-    case PROFILE_HEARING: return "HEARING";
-    default:              return "???";
+    case PROFILE_FLAT:      return "FLAT";
+    case PROFILE_EDM:       return "EDM";
+    case PROFILE_HARMAN_OE: return "HARMAN OE";
+    case PROFILE_HARMAN_IE: return "HARMAN IE";
+    case PROFILE_HEARING:   return "HEARING";
+    default:                return "???";
     }
 }
 

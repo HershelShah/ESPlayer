@@ -230,6 +230,54 @@ void audio_eq_preset_edm(void)
     ESP_LOGI(TAG, "Loaded EDM preset");
 }
 
+void audio_eq_preset_harman_oe(void)
+{
+    memset(&s_profile, 0, sizeof(s_profile));
+    strncpy(s_profile.name, "Harman OE", sizeof(s_profile.name));
+    s_profile.band_count = 5;
+
+    // Harman 2019 over-ear target curve approximation (relative to flat)
+    // Bass shelf: +4dB below 80Hz
+    s_profile.bands[0] = (eq_band_config_t){ .freq = 80,   .gain_db = 4.0f,  .q = 0.7f, .type = EQ_FILTER_LOW_SHELF, .enabled = true };
+    // Low-mid warmth
+    s_profile.bands[1] = (eq_band_config_t){ .freq = 250,  .gain_db = 0.5f,  .q = 1.0f, .type = EQ_FILTER_PEAKING,   .enabled = true };
+    // Presence dip
+    s_profile.bands[2] = (eq_band_config_t){ .freq = 3000, .gain_db = -2.0f, .q = 1.5f, .type = EQ_FILTER_PEAKING,   .enabled = true };
+    // Treble rolloff
+    s_profile.bands[3] = (eq_band_config_t){ .freq = 6000, .gain_db = -4.0f, .q = 1.0f, .type = EQ_FILTER_PEAKING,   .enabled = true };
+    // Air rolloff
+    s_profile.bands[4] = (eq_band_config_t){ .freq = 10000, .gain_db = -6.0f, .q = 0.7f, .type = EQ_FILTER_HIGH_SHELF, .enabled = true };
+
+    for (int i = 0; i < s_profile.band_count; i++)
+        recompute_filter(i);
+
+    ESP_LOGI(TAG, "Loaded Harman OE 2019 preset");
+}
+
+void audio_eq_preset_harman_ie(void)
+{
+    memset(&s_profile, 0, sizeof(s_profile));
+    strncpy(s_profile.name, "Harman IE", sizeof(s_profile.name));
+    s_profile.band_count = 5;
+
+    // Harman 2019 in-ear target curve approximation
+    // Stronger bass shelf for IEMs
+    s_profile.bands[0] = (eq_band_config_t){ .freq = 80,   .gain_db = 6.0f,  .q = 0.7f, .type = EQ_FILTER_LOW_SHELF, .enabled = true };
+    // Slight warmth
+    s_profile.bands[1] = (eq_band_config_t){ .freq = 300,  .gain_db = 0.5f,  .q = 1.0f, .type = EQ_FILTER_PEAKING,   .enabled = true };
+    // Presence dip
+    s_profile.bands[2] = (eq_band_config_t){ .freq = 3500, .gain_db = -3.0f, .q = 1.2f, .type = EQ_FILTER_PEAKING,   .enabled = true };
+    // Treble rolloff
+    s_profile.bands[3] = (eq_band_config_t){ .freq = 7000, .gain_db = -5.0f, .q = 1.0f, .type = EQ_FILTER_PEAKING,   .enabled = true };
+    // Air rolloff
+    s_profile.bands[4] = (eq_band_config_t){ .freq = 10000, .gain_db = -8.0f, .q = 0.7f, .type = EQ_FILTER_HIGH_SHELF, .enabled = true };
+
+    for (int i = 0; i < s_profile.band_count; i++)
+        recompute_filter(i);
+
+    ESP_LOGI(TAG, "Loaded Harman IE 2019 preset");
+}
+
 // ---------------------------------------------------------------------------
 // Save / Load profiles to SD card
 // ---------------------------------------------------------------------------
@@ -295,6 +343,74 @@ esp_err_t audio_eq_load_profile_file(const char *filename)
     }
 
     fclose(f);
+    audio_eq_load_profile(&prof);
+    return ESP_OK;
+}
+
+// ---------------------------------------------------------------------------
+// AutoEQ ParametricEQ.txt parser
+// Format: "Filter N: ON PK Fc XXXX Hz Gain X.X dB Q X.XX"
+//     or: "Filter N: ON LSC Fc XXXX Hz Gain X.X dB Q X.XX"
+//     or: "Filter N: ON HSC Fc XXXX Hz Gain X.X dB Q X.XX"
+// ---------------------------------------------------------------------------
+
+esp_err_t audio_eq_load_autoeq(const char *filepath)
+{
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        ESP_LOGE(TAG, "Cannot open AutoEQ file: %s", filepath);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    eq_profile_t prof;
+    memset(&prof, 0, sizeof(prof));
+
+    // Extract name from filename (last path component, without extension)
+    const char *name = filepath;
+    const char *slash = strrchr(filepath, '/');
+    if (slash) name = slash + 1;
+    strncpy(prof.name, name, sizeof(prof.name) - 1);
+    char *dot = strrchr(prof.name, '.');
+    if (dot) *dot = '\0';
+
+    char line[256];
+    while (fgets(line, sizeof(line), f) && prof.band_count < EQ_MAX_BANDS) {
+        int filter_num;
+        char on_off[8], type[8];
+        float freq, gain, q;
+
+        // Try parsing AutoEQ format
+        if (sscanf(line, "Filter %d: %7s %7s Fc %f Hz Gain %f dB Q %f",
+                   &filter_num, on_off, type, &freq, &gain, &q) == 6) {
+
+            if (strcmp(on_off, "ON") != 0) continue;
+
+            int idx = prof.band_count;
+            prof.bands[idx].freq = freq;
+            prof.bands[idx].gain_db = gain;
+            prof.bands[idx].q = q;
+            prof.bands[idx].enabled = true;
+
+            if (strcmp(type, "LSC") == 0 || strcmp(type, "LS") == 0)
+                prof.bands[idx].type = EQ_FILTER_LOW_SHELF;
+            else if (strcmp(type, "HSC") == 0 || strcmp(type, "HS") == 0)
+                prof.bands[idx].type = EQ_FILTER_HIGH_SHELF;
+            else
+                prof.bands[idx].type = EQ_FILTER_PEAKING;
+
+            prof.band_count++;
+            ESP_LOGI(TAG, "AutoEQ band %d: %s %.0fHz %+.1fdB Q%.2f",
+                     idx, type, freq, gain, q);
+        }
+    }
+
+    fclose(f);
+
+    if (prof.band_count == 0) {
+        ESP_LOGW(TAG, "No bands parsed from AutoEQ file");
+        return ESP_ERR_NOT_FOUND;
+    }
+
     audio_eq_load_profile(&prof);
     return ESP_OK;
 }
